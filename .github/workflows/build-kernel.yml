@@ -102,11 +102,14 @@ jobs:
       - name: Build Image.gz-dtb
         working-directory: kernel
         run: |
+          set -o pipefail
           export PATH="$PWD/../gcc64/bin:$PWD/../gcc32/bin:$PATH"
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            KCFLAGS="-Wno-error=unused-value -Wno-unused-value" \
             -j"$(nproc)" Image.gz-dtb 2>&1 | tee build.log
+          ls -l out/arch/arm64/boot/
 
       - name: Collect outputs
         run: |
