@@ -47,6 +47,14 @@ jobs:
           done
           git status --short
 
+      - name: Relax -Werror in qcacld
+        working-directory: kernel
+        run: |
+          # LineageOS 用 clang 构建时这些 format/unused-value 警告不是错误，
+          # GCC 4.9 + 新版头文件会报出来，这里降级为警告（不改语义）
+          sed -i 's/-Werror/-Wno-error/g' drivers/staging/qcacld-3.0/Kbuild
+          grep -n 'Wno-error' drivers/staging/qcacld-3.0/Kbuild | head -3
+
       - name: Fetch GCC 4.9 toolchains
         run: |
           git clone --depth 1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 gcc64
