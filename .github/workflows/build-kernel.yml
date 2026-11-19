@@ -53,7 +53,7 @@ jobs:
           # LineageOS 官方用 clang 构建，这些 format / unused-value 警告在 GCC 4.9 下会被 -Werror 变成错误。
           # 这里统一把 -Werror 降级为 -Wno-error（只影响编译是否中断，不改变生成代码）。
           grep -rl --include=Makefile --include=Kbuild --include='*.mk' -- '-Werror' . \
-            | xargs -r sed -i 's/-Werror/-Wno-error/g'
+            | xargs -r sed -i -E 's/-Werror([^-])/-Wno-error\1/g; s/-Werror$/-Wno-error/g'
           echo "--- remaining -Werror ---"
           grep -rn --include=Makefile --include=Kbuild --include='*.mk' -- '-Werror' . | head -10 || true
 
