@@ -47,13 +47,15 @@ jobs:
           done
           git status --short
 
-      - name: Relax -Werror in qcacld
+      - name: Relax -Werror in kernel makefiles
         working-directory: kernel
         run: |
-          # LineageOS 用 clang 构建时这些 format/unused-value 警告不是错误，
-          # GCC 4.9 + 新版头文件会报出来，这里降级为警告（不改语义）
-          sed -i 's/-Werror/-Wno-error/g' drivers/staging/qcacld-3.0/Kbuild
-          grep -n 'Wno-error' drivers/staging/qcacld-3.0/Kbuild | head -3
+          # LineageOS 官方用 clang 构建，这些 format / unused-value 警告在 GCC 4.9 下会被 -Werror 变成错误。
+          # 这里统一把 -Werror 降级为 -Wno-error（只影响编译是否中断，不改变生成代码）。
+          grep -rl --include=Makefile --include=Kbuild --include='*.mk' -- '-Werror' . \
+            | xargs -r sed -i 's/-Werror/-Wno-error/g'
+          echo "--- remaining -Werror ---"
+          grep -rn --include=Makefile --include=Kbuild --include='*.mk' -- '-Werror' . | head -10 || true
 
       - name: Fetch GCC 4.9 toolchains
         run: |
