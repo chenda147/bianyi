@@ -75,13 +75,20 @@ jobs:
                      SECCOMP SECCOMP_FILTER DEVTMPFS OVERLAY_FS MACVLAN VETH \
                      MEMCG CFS_BANDWIDTH CGROUP_PIDS CGROUP_DEVICE CGROUP_NET_PRIO \
                      NF_TABLES IP6_NF_NAT IP6_NF_TARGET_MASQUERADE \
-                     NETFILTER_XT_TARGET_MASQUERADE NETFILTER_XT_MATCH_ADDRTYPE; do
+                     IP_NF_TARGET_MASQUERADE IP_NF_NAT \
+                     NETFILTER_XT_MATCH_ADDRTYPE; do
             if grep -q "^CONFIG_${opt}=y$" kernel-final.config; then
               echo "  OK      CONFIG_$opt"
             else
               echo "  MISSING CONFIG_$opt"; fail=1
             fi
           done
+          # 4.10+ 才有 xt_MASQUERADE，4.4 上不存在是正常的
+          if grep -q "^CONFIG_NETFILTER_XT_TARGET_MASQUERADE=y$" kernel-final.config; then
+            echo "  OK      CONFIG_NETFILTER_XT_TARGET_MASQUERADE"
+          else
+            echo "  N/A     CONFIG_NETFILTER_XT_TARGET_MASQUERADE (4.4 无此符号)"
+          fi
           if grep -q "^CONFIG_ANDROID_PARANOID_NETWORK=y$" kernel-final.config; then
             echo "  FAIL    CONFIG_ANDROID_PARANOID_NETWORK still enabled"; fail=1
           else
