@@ -1,0 +1,134 @@
+name: Build Droidspaces kernel for jason
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout build repo
+        uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache cpio curl flex git kmod \
+            libelf-dev libssl-dev python3 rsync unzip wget xz-utils zip
+
+      - name: Clone kernel source (lineage-17.1, 4.4.247)
+        run: |
+          git clone --depth 1 -b lineage-17.1 \
+            https://github.com/LineageOS/android_kernel_xiaomi_sdm660.git kernel
+          cd kernel
+          echo "kernel version: $(make kernelversion)"
+          echo "head commit: $(git rev-parse --short HEAD)"
+
+      - name: Apply Droidspaces non-GKI patches
+        working-directory: kernel
+        run: |
+          shopt -s nullglob
+          for p in ../patches/non-GKI/*.patch; do
+            echo "==> $(basename "$p")"
+            if patch -p1 --forward --batch < "$p"; then
+              echo "    applied"
+            else
+              echo "    WARN: not applicable to 4.4 tree, skipped"
+              git checkout -- . 2>/dev/null || true
+            fi
+          done
+          git status --short
+
+      - name: Fetch GCC 4.9 toolchains
+        run: |
+          git clone --depth 1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 gcc64
+          git clone --depth 1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9 gcc32
+          ./gcc64/bin/aarch64-linux-android-gcc --version | head -1
+          ./gcc32/bin/arm-linux-androideabi-gcc --version | head -1
+
+      - name: Configure (jason_defconfig + Droidspaces fragment)
+        working-directory: kernel
+        run: |
+          export PATH="$PWD/../gcc64/bin:$PWD/../gcc32/bin:$PATH"
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- jason_defconfig
+
+          # fragment 通过追加 + olddefconfig 合并，later lines 覆盖 earlier
+          cat ../configs/droidspaces.config >> out/.config
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- olddefconfig
+          make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- olddefconfig
+
+          cp out/.config ../kernel-final.config
+
+      - name: Verify required options
+        run: |
+          fail=0
+          echo "=== critical options ==="
+          for opt in SYSVIPC POSIX_MQUEUE PID_NS UTS_NS IPC_NS NET_NS USER_NS \
+                     SECCOMP SECCOMP_FILTER DEVTMPFS OVERLAY_FS MACVLAN VETH \
+                     MEMCG CFS_BANDWIDTH CGROUP_PIDS CGROUP_DEVICE CGROUP_NET_PRIO \
+                     NF_TABLES IP6_NF_NAT IP6_NF_TARGET_MASQUERADE \
+                     NETFILTER_XT_TARGET_MASQUERADE NETFILTER_XT_MATCH_ADDRTYPE; do
+            if grep -q "^CONFIG_${opt}=y$" kernel-final.config; then
+              echo "  OK      CONFIG_$opt"
+            else
+              echo "  MISSING CONFIG_$opt"; fail=1
+            fi
+          done
+          if grep -q "^CONFIG_ANDROID_PARANOID_NETWORK=y$" kernel-final.config; then
+            echo "  FAIL    CONFIG_ANDROID_PARANOID_NETWORK still enabled"; fail=1
+          else
+            echo "  OK      CONFIG_ANDROID_PARANOID_NETWORK disabled"
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::内核配置校验未通过"
+            exit 1
+          fi
+
+      - name: Build Image.gz-dtb
+        working-directory: kernel
+        run: |
+          export PATH="$PWD/../gcc64/bin:$PWD/../gcc32/bin:$PATH"
+          make O=out ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            -j"$(nproc)" Image.gz-dtb 2>&1 | tee build.log
+
+      - name: Collect outputs
+        run: |
+          mkdir -p artifacts
+          cp kernel/arch/arm64/boot/Image.gz-dtb artifacts/
+          cp kernel-final.config artifacts/kernel-final.config
+          cp kernel/out/Image artifacts/Image 2>/dev/null || true
+          cd artifacts
+          ls -l
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-jason-droidspaces
+          path: artifacts/*
+          if-no-files-found: error
+
+      # 把产物推到 kernel-out 分支，方便在没有 API 访问的网络里直接用 git 拉取
+      - name: Publish to kernel-out branch
+        run: |
+          SRC_SHA="$(git rev-parse --short HEAD)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan kernel-out
+          git rm -rf --cached . >/dev/null
+          rm -rf .github configs patches
+          git add artifacts
+          git commit -m "kernel build $(date -u +%Y-%m-%dT%H:%M:%SZ) from ${SRC_SHA}"
+          git push --force origin kernel-out
+
