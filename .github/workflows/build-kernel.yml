@@ -57,12 +57,15 @@ jobs:
           echo "--- remaining -Werror ---"
           grep -rn --include=Makefile --include=Kbuild --include='*.mk' -- '-Werror' . | head -10 || true
 
-      - name: Fetch GCC 4.9 toolchains
+      - name: Fetch toolchains (clang + GCC 4.9 binutils)
         run: |
           git clone --depth 1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 gcc64
           git clone --depth 1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9 gcc32
           ./gcc64/bin/aarch64-linux-android-gcc --version | head -1
-          ./gcc32/bin/arm-linux-androideabi-gcc --version | head -1
+
+          sudo apt-get install -y --no-install-recommends clang-12
+          echo "CC_BIN=$(command -v clang-12)" >> "$GITHUB_ENV"
+          clang-12 --version | head -1
 
       - name: Configure (jason_defconfig + Droidspaces fragment)
         working-directory: kernel
@@ -109,15 +112,16 @@ jobs:
             exit 1
           fi
 
-      - name: Build Image.gz-dtb
+      - name: Build Image.gz-dtb (clang)
         working-directory: kernel
         run: |
           set -o pipefail
           export PATH="$PWD/../gcc64/bin:$PWD/../gcc32/bin:$PATH"
           make O=out ARCH=arm64 \
+            CC=clang-12 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-            KCFLAGS="-Wno-error=unused-value -Wno-unused-value" \
             -j"$(nproc)" Image.gz-dtb 2>&1 | tee build.log
           ls -l out/arch/arm64/boot/
 
